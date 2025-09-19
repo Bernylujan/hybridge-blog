@@ -1,17 +1,17 @@
-// Configurar variables de entorno
+
 // Configura variables de entorno
 require('dotenv').config({ silent: true });
 
 const express = require('express');
 const { Post, Author, User } = require('./models');
 
-// Importar dependencias de autenticación
+
+// Importar dependencias de autenticaciÃ³n
 const passport      = require('passport');
 const LocalStrategy = require('passport-local').Strategy;
 const { Strategy: JwtStrategy, ExtractJwt } = require('passport-jwt');
 const jwt           = require('jsonwebtoken');
 const bcrypt        = require('bcryptjs');
-const db = require('./models');
 
 const app = express();
 
@@ -19,81 +19,85 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-/* ───── 2. Estrategia Local (login) ───── */
-//Ayyuda a configurar password. Usaremos el email como el userName.
+
+/* â”€â”€â”€â”€â”€ 2. Estrategia Local (login) â”€â”€â”€â”€â”€ */
 passport.use('local',
-  new LocalStrategy(
-    { usernameField: 'email', passwordField: 'password', session: false },
-    async (email, password, done) => {
-      try {
-        const user = await User.findOne({ where: { email } });
-        if (!user) {
-          return done(null, false, { message: 'Usuario no existe' });
-        }
-        const ok = await bcrypt.compare(password, user.password);
-        if (!ok) {
-          return done(null, false, { message: 'Contraseña incorrecta' });
-        }
-        return done(null, user); // autenticado
-      } catch (err) { return done(err); }
-    }
-  )
+    new LocalStrategy(
+      { usernameField: 'email', passwordField: 'password', session: false },
+      async (email, password, done) => {
+        try {
+          const user = await User.findOne({ where: { email } });
+          if (!user) {
+            return done(null, false, { message: 'Usuario no existe' });
+          }
+          const ok = await bcrypt.compare(password, user.password);
+          if (!ok) {
+            return done(null, false, { message: 'ContraseÃ±a incorrecta' });
+          }
+          return done(null, user); // autenticado
+        } catch (err) { return done(err); }
+      }
+    )
 );
 
-// Estrategia JWT
+//Estrategia JWT
 passport.use('jwt',
-    new JwtStrategy({
-      secretOrkey: process.env.JWT_SECRET,
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken()
-    },
-    async (token, done) => {
-      try {
-        done(null, token.user);
-      } catch (err) {
-        done(err);
-      }
-    }
-  )
+    new JwtStrategy(
+        {
+            secretOrKey: process.env.JWT_SECRET,
+            jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+        },
+        async (token, done) => {
+            try {
+                return done(null, token.user);
+            } catch (err) {
+                return done(err);
+            }
+        }
+    )
 )
 
-// Ruuta login
-app.post('/api/login', passport.authenticate('local', {session:false}), (req,res) => {
-  const {id,email} = req.body;
-  const token = jwt.sign(
-    {user: {id, email}},
-    process.env.JWT_SECRET,
-    {expiresIn: '1h'}
-  );
-  res.json({token})
+//Ruta registro
+app.post('/api/signup', async(req, res) => {
+    try {
+        const { name,  email, password } = req.body;
+        const hash = await bcrypt.hash(password, 10);
+        const user = await User.create({ name, email, password: hash });
+        res.status(201).json({ id: user.id, email: user.email });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
 })
 
-const authMiddleware = passport.authenticate('jwt', {session: false});
+//Ruta login
+app. post('/api/login', passport.authenticate('local', { session: false }), (req, res) => {
+    const { id, email } = req.body;
+    const token = jwt.sign(
+        { user: { id, email }},
+        process.env.JWT_SECRET,
+        { expiresIn: '1h' }
+    );
+    res.json({ token });
+})
 
+const authMiddleware = passport.authenticate('jwt', { session: false });
+
+
+//Ruta protegida para que solo el usuario autenticado pueda crear un post
 app.post('/posts', authMiddleware, async (req, res) => {
     const { title, content, authorId } = req.body;
     if (!title || !content || !authorId) {
-      return res.status(400).json({ error: 'Título, contenido y authorId son requeridos' });
+      return res.status(400).json({ error: 'TÃ­tulo, contenido y authorId son requeridos' });
     }
     try {
       // req.user.id es el ID del usuario autenticado
       const post = await Post.create({ title, content, authorId: req.user.id });  // Asigna al usuario logueado
       res.status(201).json(post);
     } catch (error) {
-      res.status(400).json({ error: 'No se pudo crear la publicación' });
+      res.status(400).json({ error: 'No se pudo crear la publicaciÃ³n' });
     }
-  });
+});
 
-//Ruta para registrar un usuario
-app.post('/api/signup', async(req,res) => {
-  try {
-    const { name, email, password } = req.body;
-    const hash = await bcrypt.hash(password, 10);
-    const user = await User.create({name, email, password: hash});
-    res.status(201).json({id: user.id, email: user.email});
-  } catch (error) {
-    res.status(400).json({error: error.message});
-  }
-})
 
 
 app.listen(PORT, () => {
@@ -107,7 +111,7 @@ app.get('/', (req, res) => {
 })
 
 //Ruta para obtener los posts
-app.get('/posts', async (req, res) => {
+app.get('/posts', authMiddleware, async (req, res) => {
     try {
         const posts = await Post.findAll();
         res.json(posts);
@@ -117,35 +121,45 @@ app.get('/posts', async (req, res) => {
     }
 });
 
-// app.post('/new_post', async (req,res) => {
-//   const { post } = req.body;
-//     if (!post) {
-//         return res.status(400).json({ error: 'El contenido es requerido' })
-//     }
-//     try {
-//         const post = await Post.create({ post });
-//         res.status(201).json(post)
-//     } catch (error) {
-//         res.status(400).json({ error: 'No se pudo crear el post' });
-//     }
-// })
-
-app.post('/post', async (req,res) => {
-  const { title, content, authorId } = req.body;
-  try{
-    const author = await Author.findByPk(authorId);
-    if (!author) {
-      return res.status(400).json({error: 'Este autor no existe'})
+//Crear un post
+app.post('/post', async (req, res)=> {
+    const { title, content, authorId } = req.body;
+    try {
+        const author = await Author.findByPk(authorId);
+        if (!author) {
+            return res.status(400).json({ error: 'Este autor no existe' })
+        }
+        const post = await Post.create({ title, content, authorId });
+        res.status(201).json(post);
+    } catch (error) {
+        res.status(400).json({ error: 'No se pudo crear la publicaciÃ³n' })
     }
-    const post = await Post.create({ title, content, authorId })
-    res.status(201).json(post)
-  } catch (error){
-    res.status(400).json({ error: 'No se pudo crear la publicación'})
-  }
 })
 
+// Eliminar una publicación
+app.delete('/posts', authMiddleware, async (req, res) => {
+  const { id } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ error: 'El id de la publicación es requerido' });
+  }
+
+  try {
+    const post = await Post.findByPk(id);
+    if (!post) {
+      return res.status(404).json({ error: 'Publicación no encontrada' });
+    }
+
+    await post.destroy();
+    return res.status(204).send(); // Sin contenido
+  } catch (error) {
+    console.error('Error al eliminar publicación:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
 //Crear un autor
-app.post('/author', async (req, res) => {
+app.post('/authors', authMiddleware, async (req, res) => {
     const { name } = req.body;
     if (!name) {
         return res.status(400).json({ error: 'El nombre es requerido' })
@@ -168,13 +182,37 @@ app.get('/authors', async (req, res) => {
     }
 })
 
-//Obtener una publicacion en especifico
+
+//Obtener una PublicaciÃ³n en EspecÃ­fico 
 app.get('/posts/:id', async (req, res) => {
-  try{
-    const post = await Post.findByPk(req.params.id);
-    res.json(post)
-  }catch(error){
-    res.status(400).json({error: 'No se pudo obtener la Publicación'});
-  }
+    try {
+        const post = await Post.findByPk(req.params.id);
+        res.json(post)
+    } catch (error) {
+        res.status(400).json({ error: 'No se pudo obtener la PublicaciÃ³n' })
+    }
 })
 
+// Actualizar un autor
+app.put('/authors', authMiddleware, async (req, res) => {
+  const { id, name } = req.body;
+
+  if (!id || !name) {
+    return res.status(400).json({ error: 'El id y el nombre son requeridos' });
+  }
+
+  try {
+    const author = await Author.findByPk(id);
+    if (!author) {
+      return res.status(404).json({ error: 'Autor no encontrado' });
+    }
+
+    author.name = name;
+    await author.save();
+
+    return res.json(author);
+  } catch (error) {
+    console.error('Error al actualizar autor:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
